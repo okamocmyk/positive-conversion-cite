@@ -1,0 +1,8 @@
+{
+  "name": "Remix リフレーミング \u0026 自己肯定感アップ",
+  "description": "ネガティブな言葉や出来事をポジティブな視点へ変換（リフレーミング）し、自己肯定感を高める心理ケアアプリ",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
