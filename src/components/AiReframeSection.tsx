@@ -12,6 +12,7 @@ import {
   Smile,
   RefreshCw,
   VolumeX,
+  AlertCircle,
 } from "lucide-react";
 import { ReframedCard } from "../types";
 import { speakText, stopSpeaking } from "../utils/speech";
@@ -40,6 +41,7 @@ export const AiReframeSection: React.FC<AiReframeSectionProps> = ({ onSaveCard, 
   const [moodAfter, setMoodAfter] = useState<number | null>(null);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [savedSuccessAlert, setSavedSuccessAlert] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const handleReframe = async (textToUse?: string) => {
     const text = textToUse || inputText;
@@ -48,6 +50,7 @@ export const AiReframeSection: React.FC<AiReframeSectionProps> = ({ onSaveCard, 
     setLoading(true);
     setCurrentCard(null);
     setMoodAfter(null);
+    setErrorMessage(null);
 
     try {
       const response = await fetch("/api/reframe", {
@@ -57,7 +60,16 @@ export const AiReframeSection: React.FC<AiReframeSectionProps> = ({ onSaveCard, 
       });
 
       if (!response.ok) {
-        throw new Error("サーバーとの通信に失敗しました。");
+        let errMsg = "リフレーミング処理中にエラーが発生しました。";
+        try {
+          const errJson = await response.json();
+          if (errJson?.error) errMsg = errJson.error;
+        } catch {
+          if (response.status === 404) {
+            errMsg = "APIエンドポイント(/api/reframe)が見つかりません。Vercelでホストしている場合、vercel.json の設定とGEMINI_API_KEY環境変数をご確認ください。";
+          }
+        }
+        throw new Error(errMsg);
       }
 
       const data = await response.json();
@@ -79,9 +91,9 @@ export const AiReframeSection: React.FC<AiReframeSectionProps> = ({ onSaveCard, 
       setCurrentCard(newCard);
       // Auto-save initial card to journal history
       onSaveCard(newCard);
-    } catch (err) {
-      console.error(err);
-      alert("リフレーミング処理中にエラーが発生しました。もう一度お試しください。");
+    } catch (err: any) {
+      console.error("Reframe error:", err);
+      setErrorMessage(err.message || "リフレーミング処理中にエラーが発生しました。もう一度お試しください。");
     } finally {
       setLoading(false);
     }
@@ -219,6 +231,17 @@ export const AiReframeSection: React.FC<AiReframeSectionProps> = ({ onSaveCard, 
                 )}
               </button>
             </div>
+
+            {/* Error Diagnosis Banner */}
+            {errorMessage && (
+              <div className="bg-red-50/90 backdrop-blur-md border border-red-200 text-red-800 p-4 rounded-2xl text-xs flex items-start gap-2.5 shadow-xs animate-fade-in">
+                <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="font-bold text-red-900">変換エラーが発生しました</p>
+                  <p className="text-red-700 leading-relaxed">{errorMessage}</p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

@@ -20,6 +20,14 @@ const app = express();
 app.use(express.json());
 const PORT = 3000;
 
+// URL normalization middleware for Vercel/serverless rewrites
+app.use((req, _res, next) => {
+  if (!req.url.startsWith("/api") && req.url !== "/" && !req.url.startsWith("/@") && !req.url.includes(".")) {
+    req.url = "/api" + req.url;
+  }
+  next();
+});
+
 // Initialize Gemini AI lazily
 function getGeminiAi() {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -216,26 +224,35 @@ app.post("/api/auth/sync", requireAuth, async (req: AuthRequest, res) => {
     const displayName = req.user!.name || null;
     const photoUrl = req.user!.picture || null;
 
-    const dbUser = await getOrCreateUser(uid, email, displayName, photoUrl);
-    const cards = await getUserCards(uid);
+    let dbUser = { uid, email, displayName, photoUrl };
+    let cards: any[] = [];
+    let character: any = null;
 
-    let character = await getUserCharacterState(uid);
-    if (!character) {
-      const defaultState: CharacterState = {
-        name: "ココロん",
-        level: 1,
-        exp: 30,
-        points: 100,
-        streakDays: 1,
-        lastLoginDate: new Date().toISOString().split("T")[0],
-        equipped: {
-          headwear: "hat-flower",
-          aura: "aura-sparkles",
-        },
-        unlockedItemIds: ["hat-flower", "aura-sparkles"],
-      };
-      await upsertUserCharacterState(uid, defaultState);
-      character = defaultState;
+    if (process.env.SQL_HOST) {
+      try {
+        dbUser = await getOrCreateUser(uid, email, displayName, photoUrl);
+        cards = await getUserCards(uid);
+        character = await getUserCharacterState(uid);
+        if (!character) {
+          const defaultState: CharacterState = {
+            name: "ココロん",
+            level: 1,
+            exp: 30,
+            points: 100,
+            streakDays: 1,
+            lastLoginDate: new Date().toISOString().split("T")[0],
+            equipped: {
+              headwear: "hat-flower",
+              aura: "aura-sparkles",
+            },
+            unlockedItemIds: ["hat-flower", "aura-sparkles"],
+          };
+          await upsertUserCharacterState(uid, defaultState);
+          character = defaultState;
+        }
+      } catch (dbError) {
+        console.warn("Database sync warning (fallback to local state):", dbError);
+      }
     }
 
     res.json({
@@ -252,11 +269,14 @@ app.post("/api/auth/sync", requireAuth, async (req: AuthRequest, res) => {
 // Reframed cards CRUD
 app.get("/api/cards", requireAuth, async (req: AuthRequest, res) => {
   try {
+    if (!process.env.SQL_HOST) {
+      return res.json({ cards: [] });
+    }
     const cards = await getUserCards(req.user!.uid);
     res.json({ cards });
   } catch (error: any) {
     console.error("Fetch cards error:", error);
-    res.status(500).json({ error: error.message || "Failed to fetch cards" });
+    res.json({ cards: [], fallback: true });
   }
 });
 
@@ -266,33 +286,40 @@ app.post("/api/cards", requireAuth, async (req: AuthRequest, res) => {
     if (!card || !card.id) {
       return res.status(400).json({ error: "Invalid card data" });
     }
-    await upsertUserCard(req.user!.uid, card);
+    if (process.env.SQL_HOST) {
+      await upsertUserCard(req.user!.uid, card);
+    }
     res.json({ success: true, card });
   } catch (error: any) {
     console.error("Save card error:", error);
-    res.status(500).json({ error: error.message || "Failed to save card" });
+    res.json({ success: true, fallback: true });
   }
 });
 
 app.delete("/api/cards/:id", requireAuth, async (req: AuthRequest, res) => {
   try {
     const { id } = req.params;
-    await deleteUserCard(req.user!.uid, id);
+    if (process.env.SQL_HOST) {
+      await deleteUserCard(req.user!.uid, id);
+    }
     res.json({ success: true });
   } catch (error: any) {
     console.error("Delete card error:", error);
-    res.status(500).json({ error: error.message || "Failed to delete card" });
+    res.json({ success: true, fallback: true });
   }
 });
 
 // Character state endpoints
 app.get("/api/character", requireAuth, async (req: AuthRequest, res) => {
   try {
+    if (!process.env.SQL_HOST) {
+      return res.json({ character: null });
+    }
     const character = await getUserCharacterState(req.user!.uid);
     res.json({ character });
   } catch (error: any) {
     console.error("Fetch character error:", error);
-    res.status(500).json({ error: error.message || "Failed to fetch character state" });
+    res.json({ character: null, fallback: true });
   }
 });
 
@@ -302,11 +329,13 @@ app.post("/api/character", requireAuth, async (req: AuthRequest, res) => {
     if (!character) {
       return res.status(400).json({ error: "Invalid character data" });
     }
-    await upsertUserCharacterState(req.user!.uid, character);
+    if (process.env.SQL_HOST) {
+      await upsertUserCharacterState(req.user!.uid, character);
+    }
     res.json({ success: true, character });
   } catch (error: any) {
     console.error("Save character error:", error);
-    res.status(500).json({ error: error.message || "Failed to save character state" });
+    res.json({ success: true, fallback: true });
   }
 });
 
@@ -331,4 +360,9 @@ async function startServer() {
   });
 }
 
-startServer();
+// Only start standalone server listener when not running in Vercel or serverless
+if (!process.env.VERCEL && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
+  startServer();
+}
+
+export default app;

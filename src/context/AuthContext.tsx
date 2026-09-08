@@ -57,7 +57,18 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       await signInWithPopup(auth, googleAuthProvider);
     } catch (err: any) {
       console.error("Sign in error:", err);
-      setError(err.message || "Googleログインに失敗しました");
+      let userFriendlyMessage = "Googleログインに失敗しました。";
+      if (err.code === "auth/unauthorized-domain") {
+        const currentDomain = window.location.hostname;
+        userFriendlyMessage = `このドメイン（${currentDomain}）がFirebaseの「承認済みドメイン」に追加されていません。Firebase Console の「Authentication」→「Settings」→「Authorized domains」に「${currentDomain}」を追加してください。`;
+      } else if (err.code === "auth/popup-closed-by-user") {
+        userFriendlyMessage = "ログインポップアップが閉じられました。";
+      } else if (err.code === "auth/popup-blocked") {
+        userFriendlyMessage = "ブラウザによってポップアップがブロックされました。ポップアップを許可して再度お試しください。";
+      } else if (err.message) {
+        userFriendlyMessage = `ログインエラー: ${err.message}`;
+      }
+      setError(userFriendlyMessage);
       throw err;
     }
   };

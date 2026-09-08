@@ -58,3 +58,27 @@ npm run dev
 npm run build
 npm start
 ```
+
+---
+
+## Vercel デプロイ時の設定手順
+
+Vercel で AIリフレーミングや Google ログインを正常に動作させるには、以下の **3点の設定** が必要です。
+
+### 1. Vercel の環境変数（Environment Variables）の設定
+Vercel ダッシュボード（プロジェクト → **Settings** → **Environment Variables**）にて、以下を追加してください:
+- **`GEMINI_API_KEY`**: あなたの Gemini API キー（Google AI Studio で取得可能）
+
+*(任意: PostgreSQL を利用する場合)*
+- `SQL_HOST`, `SQL_USER`, `SQL_PASSWORD`, `SQL_DB_NAME`: Supabase / Neon などの接続情報（未設定の場合はブラウザのローカル保存モードで安全に動作します）
+
+### 2. Firebase の「承認済みドメイン（Authorized domains）」の追加（※Googleログインに必須）
+Firebase はセキュリティ上、許可されたドメイン以外からの OAuth ポップアップログインを拒否します。
+1. [Firebase Console](https://console.firebase.google.com/) を開きます。
+2. 対象プロジェクト（`silken-drummer-w53bd`）を選択します。
+3. 左メニュー **「Authentication」** → **「Settings（設定）」** タブ → **「Authorized domains（承認済みドメイン）」** をクリック。
+4. **「ドメインを追加」** を押し、Vercel で割り当てられたドメイン（例: `your-app.vercel.app`）を登録します。
+*(登録後、数分で反映され Google ログインが可能になります)*
+
+### 3. Vercel Serverless 設定 (`vercel.json` & `api/index.ts`)
+本リポジトリには Vercel 用に `/api/*` をサーバーレス関数としてルーティングする `vercel.json` および `api/index.ts` が同梱されています。GitHub から Vercel にインポートするだけで自動的にバックエンド API が動作します。

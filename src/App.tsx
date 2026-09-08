@@ -7,7 +7,7 @@ import { DailyCardSection } from "./components/DailyCardSection";
 import { CalendarSection } from "./components/CalendarSection";
 import { CharacterSection } from "./components/CharacterSection";
 import { ReframedCard, UserStats, CharacterState } from "./types";
-import { Heart, Cloud, LogIn, CheckCircle2, Sparkles } from "lucide-react";
+import { Heart, Cloud, LogIn, CheckCircle2, Sparkles, AlertCircle } from "lucide-react";
 import { useAuth } from "./context/AuthContext";
 
 const INITIAL_EXAMPLE_CARDS: ReframedCard[] = [
@@ -52,7 +52,7 @@ const INITIAL_CHARACTER_STATE: CharacterState = {
 };
 
 export default function App() {
-  const { user, fetchWithAuth, signInWithGoogle, loading: authLoading } = useAuth();
+  const { user, fetchWithAuth, signInWithGoogle, loading: authLoading, error: authError } = useAuth();
   const [activeTab, setActiveTab] = useState<NavTab>("ai");
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
@@ -325,6 +325,19 @@ export default function App() {
           <div className="bg-emerald-50/90 backdrop-blur-md border border-emerald-200 text-emerald-800 px-4 py-2 rounded-xl text-xs flex items-center gap-2 shadow-xs animate-fade-in font-medium">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
             <span>{syncNotice}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Auth Error Banner (e.g. Firebase unauthorized domain on Vercel) */}
+      {authError && (
+        <div className="max-w-5xl mx-auto w-full px-4 sm:px-6 pt-3">
+          <div className="bg-red-50/95 backdrop-blur-md border border-red-200 text-red-900 p-4 rounded-2xl text-xs flex items-start gap-3 shadow-sm animate-fade-in">
+            <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <p className="font-bold text-red-950">ログインエラーが発生しました</p>
+              <p className="text-red-800 leading-relaxed">{authError}</p>
+            </div>
           </div>
         </div>
       )}
