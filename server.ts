@@ -3,6 +3,16 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
+import { requireAuth, AuthRequest } from "./src/middleware/auth.ts";
+import {
+  getOrCreateUser,
+  getUserCards,
+  upsertUserCard,
+  deleteUserCard,
+  getUserCharacterState,
+  upsertUserCharacterState,
+} from "./src/db/queries.ts";
+import { CharacterState } from "./src/types.ts";
 
 dotenv.config();
 
@@ -197,6 +207,108 @@ function generateFallbackReframe(input: string, context?: string) {
     categoryTag: "自己理解・成長"
   };
 }
+
+// User synchronization endpoint (PostgreSQL / Cloud SQL)
+app.post("/api/auth/sync", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const uid = req.user!.uid;
+    const email = req.user!.email || `${uid}@app.local`;
+    const displayName = req.user!.name || null;
+    const photoUrl = req.user!.picture || null;
+
+    const dbUser = await getOrCreateUser(uid, email, displayName, photoUrl);
+    const cards = await getUserCards(uid);
+
+    let character = await getUserCharacterState(uid);
+    if (!character) {
+      const defaultState: CharacterState = {
+        name: "ココロん",
+        level: 1,
+        exp: 30,
+        points: 100,
+        streakDays: 1,
+        lastLoginDate: new Date().toISOString().split("T")[0],
+        equipped: {
+          headwear: "hat-flower",
+          aura: "aura-sparkles",
+        },
+        unlockedItemIds: ["hat-flower", "aura-sparkles"],
+      };
+      await upsertUserCharacterState(uid, defaultState);
+      character = defaultState;
+    }
+
+    res.json({
+      user: dbUser,
+      cards,
+      character,
+    });
+  } catch (error: any) {
+    console.error("Auth sync error:", error);
+    res.status(500).json({ error: error.message || "Failed to sync user" });
+  }
+});
+
+// Reframed cards CRUD
+app.get("/api/cards", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const cards = await getUserCards(req.user!.uid);
+    res.json({ cards });
+  } catch (error: any) {
+    console.error("Fetch cards error:", error);
+    res.status(500).json({ error: error.message || "Failed to fetch cards" });
+  }
+});
+
+app.post("/api/cards", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const { card } = req.body;
+    if (!card || !card.id) {
+      return res.status(400).json({ error: "Invalid card data" });
+    }
+    await upsertUserCard(req.user!.uid, card);
+    res.json({ success: true, card });
+  } catch (error: any) {
+    console.error("Save card error:", error);
+    res.status(500).json({ error: error.message || "Failed to save card" });
+  }
+});
+
+app.delete("/api/cards/:id", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const { id } = req.params;
+    await deleteUserCard(req.user!.uid, id);
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error("Delete card error:", error);
+    res.status(500).json({ error: error.message || "Failed to delete card" });
+  }
+});
+
+// Character state endpoints
+app.get("/api/character", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const character = await getUserCharacterState(req.user!.uid);
+    res.json({ character });
+  } catch (error: any) {
+    console.error("Fetch character error:", error);
+    res.status(500).json({ error: error.message || "Failed to fetch character state" });
+  }
+});
+
+app.post("/api/character", requireAuth, async (req: AuthRequest, res) => {
+  try {
+    const { character } = req.body;
+    if (!character) {
+      return res.status(400).json({ error: "Invalid character data" });
+    }
+    await upsertUserCharacterState(req.user!.uid, character);
+    res.json({ success: true, character });
+  } catch (error: any) {
+    console.error("Save character error:", error);
+    res.status(500).json({ error: error.message || "Failed to save character state" });
+  }
+});
 
 async function startServer() {
   // Vite integration

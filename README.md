@@ -5,6 +5,7 @@
 ## 主な機能
 
 - **AI リフレーミング**: Gemini API を活用し、短所やネガティブに思える表現を強みや魅力に瞬時に変換。状況別の活躍シーンや自己受容メッセージ、アファメーションを提案します。
+- **ユーザー認証 & クラウド保存**: Google アカウントでログインし、ユーザーごとにリフレーミング記録やパートナーデータを安全に PostgreSQL データベースへ永続化。
 - **リフレーミング辞書**: 日常でよくある性格や行動の言い換え一覧（検索・カテゴリ絞り込み対応）。
 - **ジャーナル / 記録**: リフレーミングした言葉や日々の気づきを保存・お気に入り管理。
 - **今日のカード & 音声読み上げ**: Web Speech API によるアファメーションの読み上げ機能。
@@ -15,6 +16,8 @@
 
 - **Frontend**: React 19, TypeScript, Vite, Tailwind CSS v4, Motion, Lucide React
 - **Backend**: Express (Node.js)
+- **Database / ORM**: PostgreSQL (Cloud SQL), Drizzle ORM
+- **Authentication**: Firebase Authentication (Google OAuth)
 - **AI**: Google Gen AI SDK (`@google/genai`)
 
 ## セットアップ手順

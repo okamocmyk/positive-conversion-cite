@@ -7,7 +7,8 @@ import { DailyCardSection } from "./components/DailyCardSection";
 import { CalendarSection } from "./components/CalendarSection";
 import { CharacterSection } from "./components/CharacterSection";
 import { ReframedCard, UserStats, CharacterState } from "./types";
-import { Heart } from "lucide-react";
+import { Heart, Cloud, LogIn, CheckCircle2, Sparkles } from "lucide-react";
+import { useAuth } from "./context/AuthContext";
 
 const INITIAL_EXAMPLE_CARDS: ReframedCard[] = [
   {
@@ -51,7 +52,11 @@ const INITIAL_CHARACTER_STATE: CharacterState = {
 };
 
 export default function App() {
+  const { user, fetchWithAuth, signInWithGoogle, loading: authLoading } = useAuth();
   const [activeTab, setActiveTab] = useState<NavTab>("ai");
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [syncNotice, setSyncNotice] = useState<string | null>(null);
+
   const [savedCards, setSavedCards] = useState<ReframedCard[]>(() => {
     try {
       const stored = localStorage.getItem("reframing_cards_v1");
@@ -76,7 +81,53 @@ export default function App() {
     return INITIAL_CHARACTER_STATE;
   });
 
-  // Sync savedCards to localStorage
+  // Sync to database when user logs in
+  useEffect(() => {
+    if (!user) return;
+
+    let isMounted = true;
+    setIsSyncing(true);
+
+    fetchWithAuth("/api/auth/sync", { method: "POST" })
+      .then((res) => {
+        if (!res.ok) throw new Error("Sync failed");
+        return res.json();
+      })
+      .then(async (data) => {
+        if (!isMounted) return;
+        if (data.cards && data.cards.length > 0) {
+          setSavedCards(data.cards);
+        } else if (savedCards.length > 0) {
+          // If user has local cards from before login, upload them
+          for (const card of savedCards) {
+            await fetchWithAuth("/api/cards", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ card }),
+            });
+          }
+        }
+
+        if (data.character) {
+          setCharacterState(data.character);
+        }
+
+        setSyncNotice("クラウドデータベースと同期しました");
+        setTimeout(() => setSyncNotice(null), 3500);
+      })
+      .catch((err) => {
+        console.error("Database sync error:", err);
+      })
+      .finally(() => {
+        if (isMounted) setIsSyncing(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user]);
+
+  // Sync to localStorage as offline fallback
   useEffect(() => {
     try {
       localStorage.setItem("reframing_cards_v1", JSON.stringify(savedCards));
@@ -85,7 +136,6 @@ export default function App() {
     }
   }, [savedCards]);
 
-  // Sync characterState to localStorage
   useEffect(() => {
     try {
       localStorage.setItem("character_state_v1", JSON.stringify(characterState));
@@ -93,6 +143,21 @@ export default function App() {
       console.error("Failed to save character state", e);
     }
   }, [characterState]);
+
+  // Helper to persist character updates to database if logged in
+  const updateCharacterWithSync = (next: CharacterState | ((prev: CharacterState) => CharacterState)) => {
+    setCharacterState((prev) => {
+      const updated = typeof next === "function" ? next(prev) : next;
+      if (user) {
+        fetchWithAuth("/api/character", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ character: updated }),
+        }).catch((err) => console.error("Failed to sync character:", err));
+      }
+      return updated;
+    });
+  };
 
   // Speech helper
   const handleSpeakText = (text: string) => {
@@ -133,14 +198,16 @@ export default function App() {
       newLevel += 1;
     }
 
-    setCharacterState((prev) => ({
-      ...prev,
+    const updated: CharacterState = {
+      ...characterState,
       level: newLevel,
       exp: newExp,
-      points: prev.points + gainedPoints,
+      points: characterState.points + gainedPoints,
       streakDays: newStreak,
-      lastLoginDate: todayStr
-    }));
+      lastLoginDate: todayStr,
+    };
+
+    updateCharacterWithSync(updated);
   };
 
   // Compute user stats
@@ -169,8 +236,16 @@ export default function App() {
       return [card, ...prev];
     });
 
+    if (user) {
+      fetchWithAuth("/api/cards", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ card }),
+      }).catch((err) => console.error("Failed to save card to cloud:", err));
+    }
+
     // Reward partner on new reframing!
-    setCharacterState((prev) => {
+    updateCharacterWithSync((prev) => {
       const gainedExp = 30;
       const gainedPoints = 50;
       let newExp = prev.exp + gainedExp;
@@ -184,28 +259,51 @@ export default function App() {
         ...prev,
         level: newLevel,
         exp: newExp,
-        points: prev.points + gainedPoints
+        points: prev.points + gainedPoints,
       };
     });
   };
 
   const handleDeleteCard = (id: string) => {
     setSavedCards((prev) => prev.filter((c) => c.id !== id));
+    if (user) {
+      fetchWithAuth(`/api/cards/${id}`, { method: "DELETE" }).catch((err) =>
+        console.error("Failed to delete card in cloud:", err)
+      );
+    }
   };
 
   const handleToggleFavorite = (id: string) => {
-    setSavedCards((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, isFavorite: !c.isFavorite } : c))
-    );
+    setSavedCards((prev) => {
+      const next = prev.map((c) => (c.id === id ? { ...c, isFavorite: !c.isFavorite } : c));
+      const target = next.find((c) => c.id === id);
+      if (user && target) {
+        fetchWithAuth("/api/cards", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ card: target }),
+        }).catch((err) => console.error("Failed to update favorite in cloud:", err));
+      }
+      return next;
+    });
   };
 
   const handleUpdateNotes = (id: string, notes: string) => {
-    setSavedCards((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, notes } : c))
-    );
+    setSavedCards((prev) => {
+      const next = prev.map((c) => (c.id === id ? { ...c, notes } : c));
+      const target = next.find((c) => c.id === id);
+      if (user && target) {
+        fetchWithAuth("/api/cards", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ card: target }),
+        }).catch((err) => console.error("Failed to update notes in cloud:", err));
+      }
+      return next;
+    });
   };
 
-  const handleSelectFromDictionary = (word: string) => {
+  const handleSelectFromDictionary = (_word: string) => {
     setActiveTab("ai");
   };
 
@@ -218,7 +316,50 @@ export default function App() {
         stats={stats}
         partnerName={characterState.name}
         partnerLevel={characterState.level}
+        isSyncing={isSyncing}
       />
+
+      {/* Sync / Notification Toast */}
+      {syncNotice && (
+        <div className="max-w-5xl mx-auto w-full px-4 sm:px-6 pt-3">
+          <div className="bg-emerald-50/90 backdrop-blur-md border border-emerald-200 text-emerald-800 px-4 py-2 rounded-xl text-xs flex items-center gap-2 shadow-xs animate-fade-in font-medium">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{syncNotice}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Account Login Invitation Banner (shown when guest) */}
+      {!user && !authLoading && (
+        <div className="max-w-5xl mx-auto w-full px-4 sm:px-6 pt-4">
+          <div className="bg-white/60 backdrop-blur-md border border-indigo-100 rounded-2xl p-3.5 sm:p-4 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-500 text-white flex items-center justify-center shrink-0 shadow-xs">
+                <Cloud className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-xs sm:text-sm font-bold text-gray-800 flex items-center gap-1.5">
+                  アカウント連携でデータを安全にクラウド保存
+                  <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200">
+                    ユーザー個別管理
+                  </span>
+                </h2>
+                <p className="text-xs text-gray-500">
+                  Googleアカウントでログインすると、あなただけのリフレーミング記録やココロんの育成データが安全に保存されます。
+                </p>
+              </div>
+            </div>
+            <button
+              id="banner-login-btn"
+              onClick={() => signInWithGoogle()}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2 rounded-xl flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer whitespace-nowrap self-start sm:self-auto"
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              <span>Googleでログイン</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-5xl w-full mx-auto px-4 py-6 sm:px-6">
@@ -238,7 +379,7 @@ export default function App() {
         {activeTab === "character" && (
           <CharacterSection
             characterState={characterState}
-            onUpdateCharacterState={setCharacterState}
+            onUpdateCharacterState={updateCharacterWithSync}
             onClaimDailyBonus={handleClaimDailyBonus}
           />
         )}
@@ -275,4 +416,3 @@ export default function App() {
     </div>
   );
 }
-
